@@ -12,15 +12,27 @@ pipeline {
     }
 
     stage('Unit Tests') {
-      steps {
-        sh '''
-          # run pytest inside a python container, mounting repo into /usr/src
-          docker run --rm \
-            -v "${PWD}":/usr/src \
-            -w /usr/src \
-            python:3.10-slim bash -c "pip install --no-cache-dir -r requirements.txt && pytest -q"
-        '''
-      }
+  steps {
+    // debug: show where we are and what files exist
+    sh '''
+      echo "WORKSPACE = ${WORKSPACE}"
+      echo "PWD = $(pwd)"
+      echo "List workspace root:"
+      ls -la "${WORKSPACE}" || true
+      echo "List current dir:"
+      ls -la . || true
+    '''
+
+    // run tests inside a python container, mounting the Jenkins workspace explicitly
+    sh '''
+      docker run --rm \
+        -v "${WORKSPACE}":/usr/src \
+        -w /usr/src \
+        python:3.10-slim bash -c "ls -la && cat requirements.txt || true; pip install --no-cache-dir -r requirements.txt && pytest -q"
+    '''
+  }
+}
+
 }
 
 
