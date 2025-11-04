@@ -86,21 +86,19 @@ pipeline {
     }
 
     stage('Deploy Green') {
-      agent { label 'any' } // or simply remove agent stanza if pipeline already uses agent any
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            echo "Using docker run to run kubectl image..."
-            # mount the kubeconfig file into the container path /root/.kube/config
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-              --entrypoint kubectl \
-              bitnami/kubectl:1.27 \
-              apply -f k8s/green-deployment.yaml
-          '''
-        }
-      }
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        echo "Using docker run to run kubectl image..."
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          bitnami/kubectl:1.27 \
+          apply -f k8s/green-deployment.yaml
+      '''
     }
+  }
+}
 
 
     stage('Switch Service to Green') {
@@ -119,11 +117,20 @@ pipeline {
 
 
     stage('Rollback (if tests fail)') {
-      steps {
-        // revert service to blue
-        sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"blue\"}}}'"
-      }
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        echo "Rolling back service selector to blue via kubectl container..."
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          bitnami/kubectl:1.27 \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+      '''
     }
+  }
+}
+
 
   }
 
