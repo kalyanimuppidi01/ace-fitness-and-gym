@@ -90,13 +90,16 @@ pipeline {
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
           sh '''
             echo "Using docker run to run kubectl image..."
-            # Mount the temporary directory ($KUBECONFIG_FILE) to /tmp/kube
-            # The actual config file inside the container is /tmp/kube/kubeconfig
+
+            # 1. Use 'find' or 'ls' to get the full absolute path of the generated credential file.
+            # Jenkins puts the file *inside* the directory specified by KUBECONFIG_FILE.
+            KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
+
+            # 2. Mount the single file (${KUBECONFIG_PATH_ON_HOST}) to the required file path inside the container.
             docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
               --entrypoint kubectl \
               lachlanevenson/k8s-kubectl:latest \
-              --kubeconfig=/tmp/kube/kubeconfig \
               apply -f k8s/green-deployment.yaml
           '''
         }
@@ -104,38 +107,47 @@ pipeline {
     }
 
 
-   stage('Switch Service to Green') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
-              --entrypoint kubectl \
-              lachlanevenson/k8s-kubectl:latest \
-              --kubeconfig=/tmp/kube/kubeconfig \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-          '''
-        }
-      }
+  stage('Switch Service to Green') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        # 1. Find the actual file path inside the temporary directory provided by Jenkins.
+        # This is necessary because KUBECONFIG_FILE is a directory, not a file.
+        KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
+        
+        echo "Found Kubeconfig file at: ${KUBECONFIG_PATH_ON_HOST}"
+
+        # 2. Mount the specific file (not the directory) to the container's default location.
+        docker run --rm \
+          -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+      '''
     }
+  }
+}
 
 
 
 
-    stage('Rollback (if tests fail)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
-              --entrypoint kubectl \
-              lachlanevenson/k8s-kubectl:latest \
-              --kubeconfig=/tmp/kube/kubeconfig \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
-          '''
-        }
-      }
+   stage('Rollback (if tests fail)') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        # 1. Find the actual file path inside the temporary directory.
+        KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
+
+        # 2. Mount the specific file (not the directory) to the container's default location.
+        docker run --rm \
+          -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+      '''
     }
+  }
+}
 
 
   }
