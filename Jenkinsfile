@@ -2,54 +2,50 @@ pipeline {
   agent any
   environment {
     DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
-    SONARQUBE_SERVER = 'SonarQube' // name configured in Jenkins (if used)
+    // Ensure this URL is reachable by the Jenkins agent (e.g., use http://host.docker.internal:9000)
+    SONARQUBE_HOST = 'http://sonarqube:9000' 
   }
 
   stages {
-    stage('Checkout Jenkinsfile') {
+    stage('Checkout SCM') {
       steps {
-        // This ensures Jenkins checks out the Jenkinsfile & pipeline workspace
         checkout scm
       }
     }
 
-    stage('Unit Tests') {
+    // --- FIX: Installing pytest and generating coverage report ---
+    stage('Unit Tests & Coverage') {
       steps {
-        // Debug: show workspace and files before running tests
-        sh '''
-          echo "==== DEBUG: Jenkins workspace info ===="
-          echo "WORKSPACE = $WORKSPACE"
-          echo "PWD = $(pwd)"
-          echo "Listing workspace root:"
-          ls -la "$WORKSPACE" || true
-          echo "Listing current dir:"
-          ls -la . || true
-        '''
-
-        // Run tests inside a ephemeral python container and mount the Jenkins workspace
         sh '''
           docker run --rm \
             -v "$WORKSPACE":/usr/src \
             -w /usr/src \
-            python:3.10-slim bash -c "echo 'Inside container, listing /usr/src:' && ls -la /usr/src || true; \
-            if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'requirements.txt NOT found'; fi; \
-            pytest -q || true"
+            python:3.10-slim bash -c "echo 'Inside container, preparing environment...' && \
+            
+            # Install necessary tools: pytest, pytest-cov, and project dependencies
+            pip install --no-cache-dir pytest pytest-cov && \
+            if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'Project requirements.txt NOT found, continuing...'; fi; \
+            
+            # Run tests and output coverage to SonarQube's expected location.
+            pytest --cov=app --cov-report=xml:coverage.xml -q || true"
         '''
       }
     }
 
+    // --- FIX: SonarQube URL and Coverage Import ---
     stage('SonarQube Analysis') {
-      when { expression { return false } } // disabled by default; enable later
+      when { expression { return true } } // Explicitly enabled
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
             docker run --rm -v "$WORKSPACE":/usr/src -w /usr/src \
-              -e SONAR_HOST_URL="http://sonarqube:9000" \
+              -e SONAR_HOST_URL="${SONARQUBE_HOST}" \
               -e SONAR_LOGIN="$SONAR_TOKEN" \
               sonarsource/sonar-scanner-cli \
               -Dsonar.projectKey=aceest-fitness \
               -Dsonar.sources=. \
-              -Dsonar.python.version=3.10
+              -Dsonar.python.version=3.10 \
+              -Dsonar.python.coverage.reportPaths=coverage.xml
           '''
         }
       }
@@ -58,7 +54,6 @@ pipeline {
     stage('Build Docker Image') {
       steps {
         script {
-          // Attempt to use most recent tag; fallback to v1.4
           def tag = sh(script: "git describe --tags --abbrev=0 || echo 'v1.4'", returnStdout: true).trim()
           def image = "${DOCKERHUB_REPO}:${tag}"
           sh "docker build -t ${image} ."
@@ -85,19 +80,21 @@ pipeline {
       }
     }
 
+    // --- FIX: Credential Mounting (Apply Green) ---
     stage('Deploy Green') {
       steps {
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
           sh '''
             echo "Using docker run to run kubectl image..."
 
-            # 1. Use 'find' or 'ls' to get the full absolute path of the generated credential file.
-            # Jenkins puts the file *inside* the directory specified by KUBECONFIG_FILE.
-            KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
+            # 1. Find the actual FILENAME (only the leaf name) inside the directory.
+            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
 
-            # 2. Mount the single file (${KUBECONFIG_PATH_ON_HOST}) to the required file path inside the container.
+            # 2. Mount the directory (${KUBECONFIG_FILE}) to a fixed directory in the container (/tmp/kube).
+            # 3. Set the KUBECONFIG env var to the file's path *inside* the container.
             docker run --rm \
-              -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
               --entrypoint kubectl \
               lachlanevenson/k8s-kubectl:latest \
               apply -f k8s/green-deployment.yaml
@@ -106,49 +103,45 @@ pipeline {
       }
     }
 
+    // --- FIX: Credential Mounting (Switch Service) ---
+    stage('Switch Service to Green') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            # Find the actual FILENAME
+            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
 
-  stage('Switch Service to Green') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        # 1. Find the actual file path inside the temporary directory provided by Jenkins.
-        # This is necessary because KUBECONFIG_FILE is a directory, not a file.
-        KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
-        
-        echo "Found Kubeconfig file at: ${KUBECONFIG_PATH_ON_HOST}"
-
-        # 2. Mount the specific file (not the directory) to the container's default location.
-        docker run --rm \
-          -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          lachlanevenson/k8s-kubectl:latest \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-      '''
+            # Mount the directory and set KUBECONFIG env var
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
+              --entrypoint kubectl \
+              lachlanevenson/k8s-kubectl:latest \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+          '''
+        }
+      }
     }
-  }
-}
 
+    // --- FIX: Credential Mounting (Rollback) ---
+    stage('Rollback (if tests fail)') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            # Find the actual FILENAME
+            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
 
-
-
-   stage('Rollback (if tests fail)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        # 1. Find the actual file path inside the temporary directory.
-        KUBECONFIG_PATH_ON_HOST=$(find "${KUBECONFIG_FILE}" -type f -print -quit)
-
-        # 2. Mount the specific file (not the directory) to the container's default location.
-        docker run --rm \
-          -v "${KUBECONFIG_PATH_ON_HOST}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          lachlanevenson/k8s-kubectl:latest \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
-      '''
+            # Mount the directory and set KUBECONFIG env var
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
+              --entrypoint kubectl \
+              lachlanevenson/k8s-kubectl:latest \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+          '''
+        }
+      }
     }
-  }
-}
-
 
   }
 
