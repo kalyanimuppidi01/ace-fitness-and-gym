@@ -91,10 +91,10 @@ pipeline {
       sh '''
         echo "Using docker run to run kubectl image..."
         docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          bitnami/kubectl:1.27 \
-          apply -f k8s/green-deployment.yaml
+  -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+  --entrypoint kubectl \
+  lachlanevenson/k8s-kubectl:latest \
+  apply -f k8s/green-deployment.yaml
       '''
     }
   }
@@ -122,10 +122,10 @@ pipeline {
       sh '''
         echo "Rolling back service selector to blue via kubectl container..."
         docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          bitnami/kubectl:1.27 \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+  -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+  --entrypoint kubectl \
+  lachlanevenson/k8s-kubectl:latest \
+  patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
       '''
     }
   }
