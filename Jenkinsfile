@@ -86,53 +86,56 @@ pipeline {
     }
 
     stage('Deploy Green') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        echo "Using docker run to run kubectl image..."
-        docker run --rm \
-  -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-  --entrypoint kubectl \
-  lachlanevenson/k8s-kubectl:latest \
-  apply -f k8s/green-deployment.yaml
-      '''
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            echo "Using docker run to run kubectl image..."
+            # Mount the temporary directory ($KUBECONFIG_FILE) to /tmp/kube
+            # The actual config file inside the container is /tmp/kube/kubeconfig
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              --entrypoint kubectl \
+              lachlanevenson/k8s-kubectl:latest \
+              --kubeconfig=/tmp/kube/kubeconfig \
+              apply -f k8s/green-deployment.yaml
+          '''
+        }
+      }
     }
-  }
-}
 
 
    stage('Switch Service to Green') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config/config:ro \
-          --entrypoint kubectl \
-          lachlanevenson/k8s-kubectl:latest \
-          --kubeconfig=/root/.kube/config/config \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-      '''
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              --entrypoint kubectl \
+              lachlanevenson/k8s-kubectl:latest \
+              --kubeconfig=/tmp/kube/kubeconfig \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+          '''
+        }
+      }
     }
-  }
-}
 
 
 
 
     stage('Rollback (if tests fail)') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config/config:ro \
-          --entrypoint kubectl \
-          lachlanevenson/k8s-kubectl:latest \
-          --kubeconfig=/root/.kube/config/config \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
-      '''
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
+              --entrypoint kubectl \
+              lachlanevenson/k8s-kubectl:latest \
+              --kubeconfig=/tmp/kube/kubeconfig \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+          '''
+        }
+      }
     }
-  }
-}
 
 
   }
