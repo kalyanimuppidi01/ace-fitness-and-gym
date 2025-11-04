@@ -85,25 +85,17 @@ pipeline {
       }
     }
     stage('Deploy Green') {
-  agent {
-    docker {
-      image 'bitnami/kubectl:1.27'  // kubectl inside container
-      args '-v /var/run/docker.sock:/var/run/docker.sock' // optional for docker-in-docker
-    }
-  }
+  agent { label 'any' } // or simply remove agent stanza if pipeline already uses agent any
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       sh '''
-        echo "Setting up kubeconfig..."
-        export KUBECONFIG="$KUBECONFIG_FILE"
-
-        echo "Checking cluster access..."
-        kubectl config get-contexts || true
-        kubectl get nodes || true
-
-        echo "Deploying Green version..."
-        kubectl apply -f k8s/green-deployment.yaml
-        echo "✅ Green deployment applied successfully"
+        echo "Using docker run to run kubectl image..."
+        # mount the kubeconfig file into the container path /root/.kube/config
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          bitnami/kubectl:1.27 \
+          apply -f k8s/green-deployment.yaml
       '''
     }
   }
@@ -111,28 +103,19 @@ pipeline {
 
 
     stage('Switch Service to Green') {
-  agent {
-    docker { image 'bitnami/kubectl:1.27' }
-  }
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       sh '''
-        export KUBECONFIG="$KUBECONFIG_FILE"
-        echo "Current service selector (before):"
-        kubectl get svc aceest-svc -o yaml | yq '.spec.selector' || true
-
-        echo "Patching service selector to route to green:"
-        kubectl patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-
-        echo "Verify endpoints for service after patch:"
-        kubectl get endpoints aceest-svc -o yaml || true
-
-        echo "Current pods matching selector:"
-        kubectl get pods -l app=aceest,env=green -o wide || true
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+          --entrypoint kubectl \
+          bitnami/kubectl:1.27 \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
       '''
     }
   }
 }
+
 
     stage('Rollback (if tests fail)') {
       steps {
