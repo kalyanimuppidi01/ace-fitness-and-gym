@@ -34,22 +34,24 @@ pipeline {
 
     // --- FIX: SonarQube URL and Coverage Import ---
     stage('SonarQube Analysis') {
-      when { expression { return true } } // Explicitly enabled
-      steps {
-        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-          sh '''
-            docker run --rm -v "$WORKSPACE":/usr/src -w /usr/src \
-              -e SONAR_HOST_URL="${SONARQUBE_HOST}" \
-              -e SONAR_LOGIN="$SONAR_TOKEN" \
-              sonarsource/sonar-scanner-cli \
-              -Dsonar.projectKey=aceest-fitness \
-              -Dsonar.sources=. \
-              -Dsonar.python.version=3.10 \
-              -Dsonar.python.coverage.reportPaths=coverage.xml
-          '''
-        }
-      }
+  when { expression { return true } } // enabled
+  steps {
+    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+      sh '''
+        echo "Running SonarScanner (will pass token via -Dsonar.login)..."
+        docker run --rm -v "$WORKSPACE":/usr/src -w /usr/src \
+          -e SONAR_HOST_URL="${SONARQUBE_HOST}" \
+          sonarsource/sonar-scanner-cli \
+          -Dsonar.projectKey=aceest-fitness \
+          -Dsonar.sources=. \
+          -Dsonar.python.version=3.10 \
+          -Dsonar.python.coverage.reportPaths=coverage.xml \
+          -Dsonar.login="${SONAR_TOKEN}"
+      '''
     }
+  }
+}
+
 
     stage('Build Docker Image') {
       steps {
