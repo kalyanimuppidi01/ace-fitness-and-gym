@@ -1,7 +1,7 @@
 pipeline {
   agent any
   environment {
-    DOCKERHUB_REPO = 'kalyanimuppidi01/ace-fitness-and-gym'
+    DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
     SONARQUBE_SERVER = 'SonarQube'   // name configured in Jenkins (if used)
   }
 
@@ -84,6 +84,26 @@ pipeline {
         echo "Deployment step would be implemented here (kubectl/helm)."
       }
     }
+    stage('Deploy Green') {
+      steps {
+        sh "kubectl apply -f k8s/green-deployment.yaml"
+        sh "kubectl rollout status deployment/aceest-green"
+      }
+    }
+
+    stage('Switch Service to Green') {
+      steps {
+        sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"green\"}}}'"
+      }
+    }
+
+    stage('Rollback (if tests fail)') {
+      steps {
+        // revert service to blue
+        sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"blue\"}}}'"
+      }
+    }
+
   }
 
   post {
