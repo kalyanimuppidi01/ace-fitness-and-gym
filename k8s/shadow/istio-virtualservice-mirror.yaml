@@ -1,0 +1,23 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: aceest-virtualservice
+spec:
+  hosts:
+  - aceest.local   # virtual host being used 
+  gateways:
+  - istio-system/ingressgateway   
+  - match:
+    - uri:
+        prefix: /   # mirror all traffic
+    route:
+    - destination:
+        host: aceest-svc   # primary service (stable)
+        port:
+          number: 80
+    mirror:
+      host: aceest-shadow-svc
+      port:
+        number: 80
+    mirrorPercentage:
+      value: 100   # send full copy of matching requests to shadow (0-100)

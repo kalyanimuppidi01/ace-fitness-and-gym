@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-shadow-svc
+  labels:
+    app: aceest
+    role: shadow
+spec:
+  selector:
+    app: aceest
+    role: shadow
+  ports:
+  - port: 80
+    targetPort: 5000
+  type: ClusterIP

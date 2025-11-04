@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-svc
+spec:
+  selector:
+    app: aceest
+    env: blue   # initial points to blue
+  ports:
+  - port: 80
+    targetPort: 5000
+  type: ClusterIP

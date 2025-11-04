@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-shadow
+  labels:
+    app: aceest
+    role: shadow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aceest
+      role: shadow
+  template:
+    metadata:
+      labels:
+        app: aceest
+        role: shadow
+    spec:
+      containers:
+      - name: aceest-shadow
+        # Shadow image (same as the variant you want to mirror to)
+        image: kalyanimuppidi/aceest-fitness:v1.4
+        ports:
+        - containerPort: 5000
+        # no readiness/liveness strictly required for shadow pods, but recommended
+        readinessProbe:
+          httpGet:
+            path: /healthcheck/ready
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5

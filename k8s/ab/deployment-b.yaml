@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-b
+  labels:
+    app: aceest
+    variant: b
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      variant: b
+  template:
+    metadata:
+      labels:
+        app: aceest
+        variant: b
+    spec:
+      containers:
+      - name: aceest
+        # Variant B (example: v1.5 or A/B experiment build)
+        image: kalyanimuppidi/aceest-fitness:v1.5
+        ports:
+        - containerPort: 5000
+        readinessProbe:
+          httpGet:
+            path: /healthcheck/ready
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
