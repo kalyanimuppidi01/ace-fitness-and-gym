@@ -2,44 +2,35 @@ pipeline {
   agent any
   environment {
     DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
-    SONARQUBE_SERVER = 'SonarQube'   // name configured in Jenkins (if used)
+    SONARQUBE_SERVER = 'SonarQube'
   }
 
   stages {
     stage('Checkout Jenkinsfile') {
       steps {
-        // This ensures Jenkins checks out the Jenkinsfile & pipeline workspace
         checkout scm
       }
     }
 
-    stage('Unit Tests') {
+    stage('Unit Tests & Coverage') {
       steps {
-        // Debug: show workspace and files before running tests
-        sh '''
-          echo "==== DEBUG: Jenkins workspace info ===="
-          echo "WORKSPACE = $WORKSPACE"
-          echo "PWD = $(pwd)"
-          echo "Listing workspace root:"
-          ls -la "$WORKSPACE" || true
-          echo "Listing current dir:"
-          ls -la . || true
-        '''
-
-        // Run tests inside a ephemeral python container and mount the Jenkins workspace
+        // Run tests inside a ephemeral python container and generate coverage in Cobertura XML format
         sh '''
           docker run --rm \
             -v "$WORKSPACE":/usr/src \
             -w /usr/src \
-            python:3.10-slim bash -c "echo 'Inside container, listing /usr/src:' && ls -la /usr/src || true; \
+            python:3.10-slim bash -c "echo 'Inside container...' && \
             if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'requirements.txt NOT found'; fi; \
-            pytest -q || true"
+            
+            # Run tests and output coverage to the default SonarQube Python location
+            pytest --cov=app --cov-report=xml:coverage.xml -q || true"
         '''
+        // Note: The SonarQube Python sensor expects 'coverage.xml' in the root, which this creates.
       }
     }
 
     stage('SonarQube Analysis') {
-      when { expression { return false } } // disabled by default; enable later
+      // NOTE: Enabled this stage!
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
@@ -49,7 +40,8 @@ pipeline {
               sonarsource/sonar-scanner-cli \
               -Dsonar.projectKey=aceest-fitness \
               -Dsonar.sources=. \
-              -Dsonar.python.version=3.10
+              -Dsonar.python.version=3.10 \
+              -Dsonar.python.coverage.reportPaths=coverage.xml
           '''
         }
       }
@@ -73,51 +65,48 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
           sh '''
             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-            docker push ${IMAGE_NAME} || true
+            docker push ${IMAGE_NAME}
           '''
         }
       }
     }
 
-    stage('Deploy (placeholder)') {
+    stage('Deploy Green') {
+      // Agent specification is removed as 'agent any' is defined globally.
       steps {
-        echo "Deployment step would be implemented here (kubectl/helm)."
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            echo "Using docker run to run kubectl image..."
+            # Apply the new green deployment, using the newly built image
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+              --entrypoint kubectl \
+              bitnami/kubectl:1.27 \
+              apply -f k8s/green-deployment.yaml
+          '''
+        }
       }
     }
-    stage('Deploy Green') {
-  agent { label 'any' } // or simply remove agent stanza if pipeline already uses agent any
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        echo "Using docker run to run kubectl image..."
-        # mount the kubeconfig file into the container path /root/.kube/config
-        docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          bitnami/kubectl:1.27 \
-          apply -f k8s/green-deployment.yaml
-      '''
-    }
-  }
-}
 
 
     stage('Switch Service to Green') {
-  steps {
-    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-      sh '''
-        docker run --rm \
-          -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-          --entrypoint kubectl \
-          bitnami/kubectl:1.27 \
-          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-      '''
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+          sh '''
+            # Patch the service selector to point traffic to the new 'green' environment
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+              --entrypoint kubectl \
+              bitnami/kubectl:1.27 \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+          '''
+        }
+      }
     }
-  }
-}
 
 
     stage('Rollback (if tests fail)') {
+      // Typically, this is used in a post-failure block, but keeping it here for demonstration.
       steps {
         // revert service to blue
         sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"blue\"}}}'"
@@ -134,8 +123,23 @@ pipeline {
       echo "Pipeline succeeded for ${env.IMAGE_NAME}"
     }
     failure {
-      echo "Pipeline failed — check console output"
+      echo "Pipeline failed — check console output. Attempting rollback..."
+      // Trigger rollback only on failure and if deployment stages were reached
+      script {
+        try {
+          // Check if the service was switched, then roll back
+          sh '''
+            echo "Rolling back service selector to blue..."
+            docker run --rm \
+              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+              --entrypoint kubectl \
+              bitnami/kubectl:1.27 \
+              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}' || true
+          '''
+        } catch (e) {
+          echo "Rollback failed: ${e}"
+        }
+      }
     }
   }
 }
-
