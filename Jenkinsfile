@@ -3,7 +3,7 @@ pipeline {
   environment {
     DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
     // Ensure this URL is reachable by the Jenkins agent (e.g., use http://host.docker.internal:9000)
-    SONARQUBE_HOST = 'http://sonarqube:9000' 
+    SONARQUBE_HOST = 'http://host.docker.internal:9000' 
   }
 
   stages {
