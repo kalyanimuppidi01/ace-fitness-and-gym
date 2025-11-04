@@ -101,31 +101,34 @@ pipeline {
 }
 
 
-    stage('Switch Service to Green') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-              --entrypoint kubectl \
-              bitnami/kubectl:1.27 \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-          '''
-        }
-      }
+   stage('Switch Service to Green') {
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/root/.kube/config/config:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          --kubeconfig=/root/.kube/config/config \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+      '''
     }
+  }
+}
+
+
 
 
     stage('Rollback (if tests fail)') {
   steps {
     withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
       sh '''
-        echo "Rolling back service selector to blue via kubectl container..."
         docker run --rm \
-  -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-  --entrypoint kubectl \
-  lachlanevenson/k8s-kubectl:latest \
-  patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+          -v "${KUBECONFIG_FILE}":/root/.kube/config/config:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          --kubeconfig=/root/.kube/config/config \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
       '''
     }
   }
