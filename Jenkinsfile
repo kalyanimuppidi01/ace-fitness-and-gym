@@ -82,68 +82,55 @@ pipeline {
       }
     }
 
-    // --- FIX: Credential Mounting (Apply Green) ---
     stage('Deploy Green') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            echo "Using docker run to run kubectl image..."
-
-            # 1. Find the actual FILENAME (only the leaf name) inside the directory.
-            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
-
-            # 2. Mount the directory (${KUBECONFIG_FILE}) to a fixed directory in the container (/tmp/kube).
-            # 3. Set the KUBECONFIG env var to the file's path *inside* the container.
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
-              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
-              --entrypoint kubectl \
-              lachlanevenson/k8s-kubectl:latest \
-              apply -f k8s/green-deployment.yaml
-          '''
-        }
-      }
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        echo "Using docker run to run kubectl image (mount file directly)..."
+        # mount the kubeconfig file as /tmp/kubeconfig inside the container
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/tmp/kubeconfig:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          --kubeconfig=/tmp/kubeconfig \
+          apply -f k8s/green-deployment.yaml
+      '''
     }
+  }
+}
 
-    // --- FIX: Credential Mounting (Switch Service) ---
+
     stage('Switch Service to Green') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            # Find the actual FILENAME
-            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
-
-            # Mount the directory and set KUBECONFIG env var
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
-              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
-              --entrypoint kubectl \
-              lachlanevenson/k8s-kubectl:latest \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
-          '''
-        }
-      }
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/tmp/kubeconfig:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          --kubeconfig=/tmp/kubeconfig \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"green"}}}'
+      '''
     }
+  }
+}
 
-    // --- FIX: Credential Mounting (Rollback) ---
+
     stage('Rollback (if tests fail)') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            # Find the actual FILENAME
-            KUBECONFIG_FILENAME=$(basename $(find "${KUBECONFIG_FILE}" -type f -print -quit))
-
-            # Mount the directory and set KUBECONFIG env var
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/tmp/kube:ro \
-              -e KUBECONFIG="/tmp/kube/${KUBECONFIG_FILENAME}" \
-              --entrypoint kubectl \
-              lachlanevenson/k8s-kubectl:latest \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
-          '''
-        }
-      }
+  steps {
+    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+      sh '''
+        docker run --rm \
+          -v "${KUBECONFIG_FILE}":/tmp/kubeconfig:ro \
+          --entrypoint kubectl \
+          lachlanevenson/k8s-kubectl:latest \
+          --kubeconfig=/tmp/kubeconfig \
+          patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+      '''
     }
+  }
+}
+
 
   }
 
