@@ -2,41 +2,51 @@ pipeline {
   agent any
   environment {
     DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
-    SONARQUBE_SERVER = 'SonarQube'
+    // Ensure this is resolvable (e.g., use http://host.docker.internal:9000 if using Docker Desktop)
+    SONARQUBE_HOST = 'http://sonarqube:9000' 
   }
 
+//---
+
   stages {
-    stage('Checkout Jenkinsfile') {
+    stage('Checkout SCM') {
       steps {
+        // This ensures Jenkins checks out the Jenkinsfile & pipeline workspace
         checkout scm
       }
     }
 
+//---
+
     stage('Unit Tests & Coverage') {
-  steps {
-    sh '''
-      docker run --rm \
-        -v "$WORKSPACE":/usr/src \
-        -w /usr/src \
-        python:3.10-slim bash -c "echo 'Inside container...' && \
+      steps {
+        // Run tests inside a ephemeral python container and mount the Jenkins workspace
+        sh '''
+          docker run --rm \
+            -v "$WORKSPACE":/usr/src \
+            -w /usr/src \
+            python:3.10-slim bash -c "echo 'Inside container, preparing environment...' && \
+            
+            # Install pytest, pytest-cov, and project dependencies
+            pip install --no-cache-dir pytest pytest-cov && \
+            if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'Project requirements.txt NOT found, continuing...'; fi; \
+            
+            # Run tests and output coverage to SonarQube's expected location.
+            # IMPORTANT: Replace 'tests/' with the path to your test files if they are in a subfolder.
+            pytest --cov=app --cov-report=xml:coverage.xml -q || true"
+        '''
+      }
+    }
 
-        # Install necessary tools: pytest, pytest-cov, and project dependencies
-        pip install --no-cache-dir pytest pytest-cov && \
-        if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'Project requirements.txt NOT found, continuing...'; fi; \
-
-        # Run tests and output coverage
-        pytest --cov=app --cov-report=xml:coverage.xml -q || true"
-    '''
-  }
-}
+//---
 
     stage('SonarQube Analysis') {
-      // NOTE: Enabled this stage!
+      when { expression { return true } } // Explicitly enabling this stage
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
             docker run --rm -v "$WORKSPACE":/usr/src -w /usr/src \
-              -e SONAR_HOST_URL="http://sonarqube:9000" \
+              -e SONAR_HOST_URL="${SONARQUBE_HOST}" \
               -e SONAR_LOGIN="$SONAR_TOKEN" \
               sonarsource/sonar-scanner-cli \
               -Dsonar.projectKey=aceest-fitness \
@@ -47,6 +57,8 @@ pipeline {
         }
       }
     }
+
+//---
 
     stage('Build Docker Image') {
       steps {
@@ -61,6 +73,8 @@ pipeline {
       }
     }
 
+//---
+
     stage('Push Docker Image') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
@@ -72,13 +86,15 @@ pipeline {
       }
     }
 
+//---
+
     stage('Deploy Green') {
-      // Agent specification is removed as 'agent any' is defined globally.
+      // Removed redundant 'agent' block as 'agent any' is defined globally.
       steps {
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
           sh '''
             echo "Using docker run to run kubectl image..."
-            # Apply the new green deployment, using the newly built image
+            # mount the kubeconfig file into the container path /root/.kube/config
             docker run --rm \
               -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
               --entrypoint kubectl \
@@ -89,12 +105,12 @@ pipeline {
       }
     }
 
+//---
 
     stage('Switch Service to Green') {
       steps {
         withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
           sh '''
-            # Patch the service selector to point traffic to the new 'green' environment
             docker run --rm \
               -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
               --entrypoint kubectl \
@@ -105,16 +121,18 @@ pipeline {
       }
     }
 
+//---
 
-    stage('Rollback (if tests fail)') {
-      // Typically, this is used in a post-failure block, but keeping it here for demonstration.
-      steps {
-        // revert service to blue
-        sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"blue\"}}}'"
-      }
-    }
+    // The manual Rollback stage is redundant if implemented in the post-failure block.
+    // stage('Rollback (if tests fail)') {
+    //   steps {
+    //     sh "kubectl patch svc aceest-svc -p '{\"spec\":{\"selector\":{\"app\":\"aceest\",\"env\":\"blue\"}}}'"
+    //   }
+    // }
 
   }
+
+//---
 
   post {
     always {
@@ -124,21 +142,22 @@ pipeline {
       echo "Pipeline succeeded for ${env.IMAGE_NAME}"
     }
     failure {
-      echo "Pipeline failed — check console output. Attempting rollback..."
-      // Trigger rollback only on failure and if deployment stages were reached
+      echo "Pipeline failed — attempting rollback."
       script {
         try {
-          // Check if the service was switched, then roll back
-          sh '''
-            echo "Rolling back service selector to blue..."
-            docker run --rm \
-              -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
-              --entrypoint kubectl \
-              bitnami/kubectl:1.27 \
-              patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}' || true
-          '''
+          // Use withCredentials to ensure KUBECONFIG_FILE is available for the rollback command
+          withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+            sh '''
+              echo "Rolling back service selector to blue..."
+              docker run --rm \
+                -v "${KUBECONFIG_FILE}":/root/.kube/config:ro \
+                --entrypoint kubectl \
+                bitnami/kubectl:1.27 \
+                patch svc aceest-svc -p '{"spec":{"selector":{"app":"aceest","env":"blue"}}}'
+            '''
+          }
         } catch (e) {
-          echo "Rollback failed: ${e}"
+          echo "Rollback failed or credentials unavailable: ${e}"
         }
       }
     }
