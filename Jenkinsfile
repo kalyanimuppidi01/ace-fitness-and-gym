@@ -13,21 +13,22 @@ pipeline {
     }
 
     stage('Unit Tests & Coverage') {
-      steps {
-        // Run tests inside a ephemeral python container and generate coverage in Cobertura XML format
-        sh '''
-          docker run --rm \
-            -v "$WORKSPACE":/usr/src \
-            -w /usr/src \
-            python:3.10-slim bash -c "echo 'Inside container...' && \
-            if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'requirements.txt NOT found'; fi; \
-            
-            # Run tests and output coverage to the default SonarQube Python location
-            pytest --cov=app --cov-report=xml:coverage.xml -q || true"
-        '''
-        // Note: The SonarQube Python sensor expects 'coverage.xml' in the root, which this creates.
-      }
-    }
+  steps {
+    sh '''
+      docker run --rm \
+        -v "$WORKSPACE":/usr/src \
+        -w /usr/src \
+        python:3.10-slim bash -c "echo 'Inside container...' && \
+
+        # Install necessary tools: pytest, pytest-cov, and project dependencies
+        pip install --no-cache-dir pytest pytest-cov && \
+        if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else echo 'Project requirements.txt NOT found, continuing...'; fi; \
+
+        # Run tests and output coverage
+        pytest --cov=app --cov-report=xml:coverage.xml -q || true"
+    '''
+  }
+}
 
     stage('SonarQube Analysis') {
       // NOTE: Enabled this stage!
