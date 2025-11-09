@@ -32,7 +32,8 @@ jobs:
       - name: Run tests and generate coverage.xml (coverage.py, robust)
         run: |
           set -euo pipefail
-          # cleanup any leftover coverage data to avoid stale absolute paths
+
+          # cleanup any leftover coverage artifacts
           rm -f .coverage .coverage.* reports/coverage.xml || true
 
           python -m pip install --upgrade pip
@@ -40,28 +41,28 @@ jobs:
           pip install coverage pytest
 
           echo "PWD: $(pwd)"
-          echo "Python: $(python -V)"
           echo "Running pytest under coverage (source=app)..."
 
-          # Run tests with coverage and force coverage to measure 'app' package
+          # Run tests under coverage; if tests spawn subprocesses, coverage
+          # will write per-process files like .coverage.hostname.* which we will combine
           coverage run --source=app -m pytest -q
 
-          echo "Coverage run exit code: $?"
+          # combine per-process coverage files (if any) into a single .coverage
+          coverage combine || true
 
-          # Show coverage report in terminal (helpful to see what's measured)
           echo "=== coverage report ==="
           coverage report -m || true
 
-          # Ensure a .coverage file was produced
+          # ensure we have a combined .coverage file
           if [ ! -f ".coverage" ]; then
-            echo "ERROR: coverage run did not produce .coverage file"
+            echo "ERROR: no .coverage file produced; listing files for debug:"
             ls -la
             exit 2
           fi
 
-          # Generate Cobertura XML for SonarCloud
+          # write Cobertura XML for SonarCloud
           mkdir -p reports
-          coverage xml -o reports/coverage.xml || (echo "coverage xml failed"; exit 3)
+          coverage xml -o reports/coverage.xml
 
           echo "=== reports/coverage.xml head ==="
           head -n 120 reports/coverage.xml || true
