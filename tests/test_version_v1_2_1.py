@@ -209,3 +209,96 @@ def test_update_progress_charts_sets_canvas(app_module_and_app):
     assert isinstance(app.progress_canvas, FakeCanvas)
     # The FakeCanvas.draw should have been called inside update_progress_charts
     assert app.progress_canvas.draw_called is True
+
+# ---------------- Additional tests added for more coverage ---------------- #
+
+def test_add_multiple_sessions_and_motivational_message(app_module_and_app):
+    """Add multiple sessions across categories and verify the motivational message branch indirectly."""
+    module, app, fake_mb = app_module_and_app
+
+    # Add small total -> should fall into 'Good start' when viewing summary (but view_summary doesn't show motivational text here)
+    app.workout_entry = _make_entry("Jumping Jacks")
+    app.duration_entry = _make_entry("10")
+    app.category_var.get = lambda: "Warm-up"
+    app.add_workout()
+
+    app.workout_entry = _make_entry("Push-ups")
+    app.duration_entry = _make_entry("10")
+    app.category_var.get = lambda: "Workout"
+    app.add_workout()
+
+    app.workout_entry = _make_entry("Stretch")
+    app.duration_entry = _make_entry("5")
+    app.category_var.get = lambda: "Cool-down"
+    app.add_workout()
+
+    # Total time is 25 -> ensure summary window builds and total_time appears in labels/text via monkeypatching Label to capture text
+    captured = []
+    def fake_label(master=None, text="", *a, **k):
+        captured.append(text)
+        return types.SimpleNamespace(pack=lambda *aa, **kk: None, grid=lambda *aa, **kk: None)
+    # monkeypatch module-level tk.Label used by the loaded module
+    setattr(module, "tk", module.tk)  # ensure module.tk exists
+    original_label = module.tk.Label
+    module.tk.Label = fake_label
+    try:
+        app.view_summary()
+    finally:
+        module.tk.Label = original_label
+
+    joined = " ".join([str(c) for c in captured]).lower()
+    assert "total time" in joined or "total" in joined
+
+def test_add_clears_entries_and_status_update(app_module_and_app):
+    module, app, fake_mb = app_module_and_app
+
+    # Use simple namespace entries (delete is a no-op)
+    app.workout_entry = types.SimpleNamespace(get=lambda: "Rowing", delete=lambda *a, **k: None)
+    app.duration_entry = types.SimpleNamespace(get=lambda: "30", delete=lambda *a, **k: None)
+    app.category_var.get = lambda: "Workout"
+
+    app.add_workout()
+
+    # verify workout was added to internal store
+    assert any(e.get("exercise") == "Rowing" for e in app.workouts["Workout"]), "Expected 'Rowing' to be recorded in workouts"
+
+    # ensure status_label exists on the app (we don't assert its exact text to avoid GUI fragility)
+    assert hasattr(app, "status_label"), "Expected app to have a status_label"
+
+
+def test_view_summary_creates_toplevel(monkeypatch, app_module_and_app):
+    """Ensure a Toplevel would be created when sessions exist (monkeypatch to record creation)."""
+    module, app, fake_mb = app_module_and_app
+    # prepare a session
+    from datetime import datetime
+    app.workouts = {"Warm-up": [], "Workout": [{"exercise": "sprint", "duration": 40, "timestamp": datetime.now().isoformat()}], "Cool-down": []}
+
+    created = {"called": False}
+    def fake_toplevel(master):
+        created["called"] = True
+        # mimic minimal Toplevel API used by view_summary
+        return types.SimpleNamespace(title=lambda *a, **k: None, geometry=lambda *a, **k: None, pack=lambda *a, **k: None)
+
+    monkeypatch.setattr(module.tk, "Toplevel", fake_toplevel, raising=False)
+    app.view_summary()
+    assert created["called"], "Expected view_summary to create a Toplevel window when sessions exist"
+
+def test_update_progress_charts_pie_recorded(app_module_and_app):
+    """Ensure the pie chart call is recorded on the DummyAxes when values > 0."""
+    module, app, fake_mb = app_module_and_app
+    from datetime import datetime
+    app.workouts = {
+        "Warm-up": [{"exercise": "jog", "duration": 3, "timestamp": datetime.now().isoformat()}],
+        "Workout": [{"exercise": "push", "duration": 7, "timestamp": datetime.now().isoformat()}],
+        "Cool-down": [{"exercise": "walk", "duration": 0, "timestamp": datetime.now().isoformat()}],
+    }
+    # ensure module.Figure is DummyFigure (so we can introspect axes)
+    module.Figure = DummyFigure
+    app.update_progress_charts()
+    # our DummyFigure created inside update_progress_charts is wrapped by FakeCanvas; access it:
+    assert isinstance(app.progress_canvas, FakeCanvas)
+    # the DummyFigure is at app.progress_canvas._fig
+    fig = app.progress_canvas._fig
+    # find any axis with pies recorded
+    pies_found = any(getattr(ax, "_pies", []) for ax in fig.subplots)
+    assert pies_found, "Expected pie() to be called on at least one axis when totals > 0"

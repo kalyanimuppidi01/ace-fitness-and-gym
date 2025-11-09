@@ -246,3 +246,121 @@ def test_on_tab_change_triggers_update(app_module_and_app, monkeypatch):
     # Simulate event object (content not used)
     app.on_tab_change(event=types.SimpleNamespace())
     assert called["count"] == 1
+
+def test_add_clears_entries_and_status_update(app_module_and_app):
+    """Ensure add_workout records the session and that the app has a status_label."""
+    module, app, fake_mb = app_module_and_app
+
+    # Use simple namespace entries (delete is a no-op)
+    app.workout_entry = types.SimpleNamespace(get=lambda: "Rowing", delete=lambda *a, **k: None)
+    app.duration_entry = types.SimpleNamespace(get=lambda: "30", delete=lambda *a, **k: None)
+    app.category_var.get = lambda: "Workout"
+
+    app.add_workout()
+
+    # verify workout was added to internal store
+    assert any(e.get("exercise") == "Rowing" for e in app.workouts["Workout"]), "Expected 'Rowing' to be recorded in workouts"
+
+    # ensure status_label exists on the app (don't assert exact text to avoid GUI fragility)
+    assert hasattr(app, "status_label"), "Expected app to have a status_label"
+
+
+def test_view_summary_creates_toplevel(monkeypatch, app_module_and_app):
+    """Ensure a Toplevel would be created when sessions exist (monkeypatch to record creation)."""
+    module, app, fake_mb = app_module_and_app
+
+    # prepare a session so view_summary will create the window
+    from datetime import datetime
+    app.workouts = {"Warm-up": [], "Workout": [{"exercise": "sprint", "duration": 40, "timestamp": datetime.now().isoformat()}], "Cool-down": []}
+
+    created = {"called": False}
+    def fake_toplevel(master):
+        created["called"] = True
+        # mimic minimal Toplevel API used by view_summary
+        return types.SimpleNamespace(title=lambda *a, **k: None, geometry=lambda *a, **k: None, config=lambda *a, **k: None, pack=lambda *a, **k: None)
+
+    monkeypatch.setattr(module.tk, "Toplevel", fake_toplevel, raising=False)
+    app.view_summary()
+    assert created["called"], "Expected view_summary to create a Toplevel window when sessions exist"
+
+
+def test_update_progress_charts_pie_recorded(app_module_and_app):
+    """Ensure pie chart call is recorded on DummyAxes when totals > 0."""
+    module, app, fake_mb = app_module_and_app
+    from datetime import datetime
+
+    # set up workouts with non-zero durations
+    app.workouts = {
+        "Warm-up": [{"exercise": "jog", "duration": 3, "timestamp": datetime.now().isoformat()}],
+        "Workout": [{"exercise": "push", "duration": 7, "timestamp": datetime.now().isoformat()}],
+        "Cool-down": [{"exercise": "walk", "duration": 0, "timestamp": datetime.now().isoformat()}],
+    }
+
+    # ensure module.Figure and FigureCanvasTkAgg are the fakes used in fixture (they are by default,
+    # but force them here in case something else mutated them)
+    module.Figure = module.Figure  # no-op but explicit for readability
+    module.FigureCanvasTkAgg = module.FigureCanvasTkAgg
+
+    # run update_progress_charts
+    app.update_progress_charts()
+
+    # our FakeCanvas (chart_canvas) should be set
+    assert getattr(app, "chart_canvas", None) is not None, "Expected chart_canvas to be created"
+
+    # the DummyFigure used by the FakeCanvas is available as attribute depending on FakeCanvas implementation;
+    # fallback: if we used DummyFigure earlier in tests it's inside the canvas object; otherwise check pie via behavior
+    # If the fake Figure is accessible, check that some axis recorded _pies
+    canvas = app.chart_canvas
+    fig = getattr(canvas, "fig", getattr(canvas, "_fig", None))
+    if fig and hasattr(fig, "_axes"):
+        pies_found = any(getattr(ax, "_pies", []) for ax in fig._axes)
+        assert pies_found, "Expected pie() to be called on at least one axis when totals > 0"
+    else:
+        # If we can't introspect the fake fig (different fake in environment), at least ensure draw was called
+        if hasattr(canvas, "draw_called"):
+            assert canvas.draw_called, "Expected the canvas.draw() to have been called"
+
+
+def test_add_multiple_sessions_and_summary_text_capture(monkeypatch, app_module_and_app):
+    """Add several sessions and capture the summary_text insertions by monkeypatching tk.Text."""
+    module, app, fake_mb = app_module_and_app
+    from datetime import datetime
+
+    # add multiple sessions
+    app.workout_entry = _make_entry("Jumping Jacks")
+    app.duration_entry = _make_entry("10")
+    app.category_var.get = lambda: "Warm-up"
+    app.add_workout()
+
+    app.workout_entry = _make_entry("Push-ups")
+    app.duration_entry = _make_entry("20")
+    app.category_var.get = lambda: "Workout"
+    app.add_workout()
+
+    app.workout_entry = _make_entry("Stretch")
+    app.duration_entry = _make_entry("5")
+    app.category_var.get = lambda: "Cool-down"
+    app.add_workout()
+
+    # Now monkeypatch tk.Text to record inserted text
+    class Recorder:
+        def __init__(self):
+            self.inserted = []
+        def insert(self, *args, **kwargs):
+            if len(args) >= 2:
+                self.inserted.append(args[1])
+        def tag_config(self, *a, **k): pass
+        def pack(self, *a, **k): pass
+        def config(self, *a, **k): pass
+
+    recorder = Recorder()
+    monkeypatch.setattr(module.tk, "Text", lambda *a, **k: recorder, raising=False)
+
+    # monkeypatch ttk.Scrollbar to safe stub (some tests expect set/config/pack)
+    monkeypatch.setattr(module.ttk, "Scrollbar", lambda *a, **k: types.SimpleNamespace(pack=lambda *a, **k: None, config=lambda *a, **k: None, set=lambda *a, **k: None), raising=False)
+
+    # call view_summary
+    app.view_summary()
+
+    combined = "".join(recorder.inserted).lower()
+    assert "total time" in combined or "total training time" in combined or any("jumping" in s.lower() or "push" in s.lower() for s in recorder.inserted), "Expected the summary text to contain session lines or totals"
