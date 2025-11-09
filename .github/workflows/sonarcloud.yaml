@@ -29,21 +29,42 @@ jobs:
           pip install -r requirements.txt
           pip install coverage pytest pytest-cov
 
-      - name: Run tests and generate coverage.xml (coverage.py)
+      - name: Run tests and generate coverage.xml (coverage.py, robust)
         run: |
-          # Clean any old coverage data
+          set -euo pipefail
+          # cleanup any leftover coverage data to avoid stale absolute paths
           rm -f .coverage .coverage.* reports/coverage.xml || true
 
-          echo "Running pytest with coverage..."
-          # Run tests from repo root, force coverage to use 'app/' as source
-          coverage run --source=app -m pytest -v
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install coverage pytest
 
-          echo "Generating Cobertura XML report..."
+          echo "PWD: $(pwd)"
+          echo "Python: $(python -V)"
+          echo "Running pytest under coverage (source=app)..."
+
+          # Run tests with coverage and force coverage to measure 'app' package
+          coverage run --source=app -m pytest -q
+
+          echo "Coverage run exit code: $?"
+
+          # Show coverage report in terminal (helpful to see what's measured)
+          echo "=== coverage report ==="
+          coverage report -m || true
+
+          # Ensure a .coverage file was produced
+          if [ ! -f ".coverage" ]; then
+            echo "ERROR: coverage run did not produce .coverage file"
+            ls -la
+            exit 2
+          fi
+
+          # Generate Cobertura XML for SonarCloud
           mkdir -p reports
-          coverage xml -o reports/coverage.xml
+          coverage xml -o reports/coverage.xml || (echo "coverage xml failed"; exit 3)
 
-          echo "Coverage XML Preview (first 40 lines):"
-          head -n 40 reports/coverage.xml || true
+          echo "=== reports/coverage.xml head ==="
+          head -n 120 reports/coverage.xml || true
 
       - name: Normalize coverage.xml for SonarCloud (fix any absolute paths)
         run: |
