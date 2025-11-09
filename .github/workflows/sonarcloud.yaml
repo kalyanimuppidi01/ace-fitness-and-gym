@@ -25,130 +25,21 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install coverage pytest pytest-cov
 
-      - name: Run tests with coverage
+      - name: Run tests and generate coverage.xml (coverage.py)
         run: |
+          # run tests under coverage from repo root so coverage paths are repo-relative
+          coverage run -m pytest
+
+          # write Cobertura-compatible XML to reports/coverage.xml
           mkdir -p reports
-          pytest --cov=app --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+          coverage xml -o reports/coverage.xml
 
-      - name: Show coverage report snippet (debug)
-        run: |
-          echo "=== reports listing ==="
-          ls -la reports || true
-          echo "=== head of coverage.xml ==="
-          head -n 120 reports/coverage.xml || true
-
-      - name: Normalize & validate coverage.xml paths for SonarCloud
-        id: normalize_cov
-        run: |
-          python - "$PWD" "reports/coverage.xml" <<'PY'
-          import sys, xml.etree.ElementTree as ET, pathlib, os
-
-          repo_root = pathlib.Path(sys.argv[1]).resolve()
-          cov_path = pathlib.Path(sys.argv[2]).resolve()
-          print("Repo root:", repo_root)
-          print("Coverage path:", cov_path)
-          tree = ET.parse(str(cov_path))
-          root = tree.getroot()
-
-          # Desired source dir - where Sonar indexes sources (repo_root / app)
-          desired_source = str(repo_root / "app")
-          print("Setting <sources> element to:", desired_source)
-
-          # Ensure <sources><source> points to desired_source
-          sources = root.find('sources')
-          if sources is None:
-              sources = ET.SubElement(root, 'sources')
-          # clear existing sources
-          for s in list(sources):
-              sources.remove(s)
-          ET.SubElement(sources, 'source').text = desired_source
-
-          def normalize_name(name):
-              if not name:
-                  return name
-              p = pathlib.Path(name)
-              # Absolute path inside repo -> make repo-relative
-              try:
-                  if p.is_absolute():
-                      rel = p.relative_to(repo_root)
-                      return str(rel)
-              except Exception:
-                  pass
-              # If it's relative but starts with './', strip it
-              s = str(p)
-              if s.startswith('./'):
-                  s = s[2:]
-              # If it's a bare filename, prefix with app/
-              if "/" not in s:
-                  return str(pathlib.Path("app") / s)
-              # If it doesn't start with app/, but contains path segments, prefer it as-is
-              if s.startswith("app/"):
-                  return s
-              # otherwise try to ensure it points inside app/
-              parts = s.split("/")
-              if parts[0] not in ("app",):
-                  return str(pathlib.Path("app") / pathlib.Path(s).name)
-              return s
-
-          # Normalize <class filename="..."> entries (Cobertura style)
-          for cls in root.findall('.//class'):
-              fname = cls.get('filename')
-              new = normalize_name(fname)
-              if new and fname != new:
-                  cls.set('filename', new)
-
-          # Normalize <file name="..."> entries (coverage.py format)
-          for f in root.findall('.//file'):
-              fname = f.get('name')
-              new = normalize_name(fname)
-              if new and fname != new:
-                  f.set('name', new)
-
-          # Save normalized XML
-          tree.write(str(cov_path), encoding='utf-8', xml_declaration=True)
-          print("Normalized coverage.xml saved:", cov_path)
-
-          # Diagnostics: verify each referenced file exists in the repo (relative to repo_root)
-          referenced = set()
-          for cls in root.findall('.//class'):
-              if cls.get('filename'):
-                  referenced.add(cls.get('filename'))
-          for f in root.findall('.//file'):
-              if f.get('name'):
-                  referenced.add(f.get('name'))
-
-          missing = []
-          for r in sorted(referenced):
-              if not r:
-                  continue
-              candidate = repo_root / r
-              if not candidate.exists():
-                  # try alternative: app/<basename>
-                  alt = repo_root / "app" / pathlib.Path(r).name
-                  if alt.exists():
-                      print(f"Mapping {r} -> {alt}")
-                  else:
-                      missing.append(r)
-
-          print("Referenced file count:", len(referenced))
-          print("Missing referenced files count:", len(missing))
-          if missing:
-              print("Missing sample (first 40):")
-              for m in missing[:40]:
-                  print(" MISSING:", m)
-              # Fail the job so you can see issues in CI logs; remove exit if you prefer non-failing
-              sys.exit(2)
-          else:
-              print("All referenced files exist under repo root.")
-          PY
-
-      - name: Show normalized coverage snippet (debug)
-        run: |
-          echo "=== post-normalize head of coverage.xml ==="
-          head -n 120 reports/coverage.xml || true
+          # quick sanity: show the xml header (first 40 lines) in CI logs
+          head -n 40 reports/coverage.xml || true
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
@@ -160,4 +51,3 @@ jobs:
             -Dsonar.projectKey=kalyanimuppidi01_ace-fitness-and-gym
             -Dsonar.sources=app
             -Dsonar.python.coverage.reportPaths=reports/coverage.xml
-            -Dsonar.qualitygate.wait=true

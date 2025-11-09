@@ -1,0 +1,11 @@
+[run]
+# only measure source under app/ so paths will be repo-relative 'app/...'
+source = app
+branch = True
+concurrency = multiprocessing
+
+[report]
+# exclude tests
+omit =
+    tests/*
+    **/tests/*
