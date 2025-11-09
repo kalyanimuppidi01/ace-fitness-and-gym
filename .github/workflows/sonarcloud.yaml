@@ -12,7 +12,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # non-shallow clone helps Sonar SCM, blame info
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,6 +31,56 @@ jobs:
         run: |
           mkdir -p reports
           pytest --cov=app --cov-report=term-missing --cov-report=xml:reports/coverage.xml
+
+      - name: Show coverage report snippet (debug)
+        run: |
+          echo "=== reports listing ==="
+          ls -la reports || true
+          echo "=== head of coverage.xml ==="
+          head -n 80 reports/coverage.xml || true
+
+      - name: Normalize coverage.xml paths for SonarCloud
+        # Fixes mismatched <source> and filename entries so Sonar can map coverage to app/ files
+        run: |
+          python - "$PWD" "reports/coverage.xml" <<'PY'
+          import sys, xml.etree.ElementTree as ET, pathlib
+          repo_root = sys.argv[1]
+          cov_path = sys.argv[2]
+          tree = ET.parse(cov_path)
+          root = tree.getroot()
+
+          # Determine desired source dir (repo-root + '/app')
+          desired_source = str(pathlib.Path(repo_root) / "app")
+
+          # Ensure <sources><source> points to the repo app dir
+          sources = root.find('sources')
+          if sources is None:
+              sources = ET.SubElement(root, 'sources')
+          # clear existing sources
+          for s in list(sources):
+              sources.remove(s)
+          ET.SubElement(sources, 'source').text = desired_source
+
+          # Prefix class filenames that appear bare (no slash) with 'app/'
+          for cls in root.findall('.//class'):
+              fname = cls.get('filename')
+              if fname and '/' not in fname and not fname.startswith('app/'):
+                  cls.set('filename', 'app/' + fname)
+
+          # Some coverage variants use <file name="..."> elements - normalize those too
+          for f in root.findall('.//file'):
+              fname = f.get('name')
+              if fname and '/' not in fname and not fname.startswith('app/'):
+                  f.set('name', 'app/' + fname)
+
+          tree.write(cov_path, encoding='utf-8', xml_declaration=True)
+          print("Normalized coverage.xml:", cov_path)
+          PY
+
+      - name: Show normalized coverage snippet (debug)
+        run: |
+          echo "=== post-normalize head of coverage.xml ==="
+          head -n 80 reports/coverage.xml || true
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
