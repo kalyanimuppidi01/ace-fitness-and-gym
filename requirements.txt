@@ -1,4 +1,6 @@
-Flask==2.2.5
-pytest==7.4.0
+Flask>=2.2,<2.3
+Werkzeug>=2.2,<3.0
+pytest
+pytest-cov
 gunicorn==20.1.0
 requests==2.31.0
