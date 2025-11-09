@@ -131,6 +131,15 @@ Then uploaded to SonarCloud for detailed analysis:
 🔗 [https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym](https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym)
 
 ---
+
+## 🐳 Multi-Version Image Automation
+
+To build and push all versions at once:
+
+```bash
+bash tools/push_all_versions.sh
+```
+
 This script:
 
 * Builds Docker images for every version (`v1.0` → `v1.3`)
@@ -187,9 +196,7 @@ This script:
 ## 👩‍💻 Maintainer
 
 **Kalyani Muppidi**
-📧 [https://github.com/kalyanimuppidi01](https://github.com/kalyanimuppidi01)
-🐳 [https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)
+📧 [GitHub Profile](https://github.com/kalyanimuppidi01)
+🐳 [Docker Hub](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)
 
 ---
-
-Would you like me to generate this as a downloadable `README.md` file (so you can just drop it into your repo)?
