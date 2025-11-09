@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # non-shallow clone so Sonar SCM/blame info is available
+          fetch-depth: 0   # ensure full history for SonarCloud blame/scm info
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,15 +31,54 @@ jobs:
 
       - name: Run tests and generate coverage.xml (coverage.py)
         run: |
-          # run tests under coverage from repo root so coverage paths are repo-relative
-          coverage run -m pytest
+          # Clean any old coverage data
+          rm -f .coverage .coverage.* reports/coverage.xml || true
 
-          # write Cobertura-compatible XML to reports/coverage.xml
+          echo "Running pytest with coverage..."
+          # Run tests from repo root, force coverage to use 'app/' as source
+          coverage run --source=app -m pytest -v
+
+          echo "Generating Cobertura XML report..."
           mkdir -p reports
           coverage xml -o reports/coverage.xml
 
-          # quick sanity: show the xml header (first 40 lines) in CI logs
+          echo "Coverage XML Preview (first 40 lines):"
           head -n 40 reports/coverage.xml || true
+
+      - name: Normalize coverage.xml for SonarCloud (fix any absolute paths)
+        run: |
+          python - "$PWD" "reports/coverage.xml" <<'PY'
+          import sys, xml.etree.ElementTree as ET, pathlib
+
+          repo_root = pathlib.Path(sys.argv[1]).resolve()
+          cov = pathlib.Path(sys.argv[2]).resolve()
+          print(f"Normalizing coverage file: {cov}")
+          tree = ET.parse(cov)
+          root = tree.getroot()
+
+          # Set <sources><source> to repo-root/app
+          desired_source = str(repo_root / "app")
+          sources = root.find("sources")
+          if sources is None:
+              sources = ET.SubElement(root, "sources")
+          for s in list(sources):
+              sources.remove(s)
+          ET.SubElement(sources, "source").text = desired_source
+          print(f"Set <source> to: {desired_source}")
+
+          # Prefix bare filenames with 'app/'
+          for cls in root.findall(".//class"):
+              f = cls.get("filename")
+              if f and not f.startswith("app/") and "/" not in f:
+                  cls.set("filename", f"app/{f}")
+          for f in root.findall(".//file"):
+              n = f.get("name")
+              if n and not n.startswith("app/") and "/" not in n:
+                  f.set("name", f"app/{n}")
+
+          tree.write(cov, encoding="utf-8", xml_declaration=True)
+          print("Normalization complete.")
+          PY
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
@@ -51,3 +90,5 @@ jobs:
             -Dsonar.projectKey=kalyanimuppidi01_ace-fitness-and-gym
             -Dsonar.sources=app
             -Dsonar.python.coverage.reportPaths=reports/coverage.xml
+            -Dsonar.coverage.exclusions=tests/**
+            -Dsonar.qualitygate.wait=true
