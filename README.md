@@ -1,44 +1,46 @@
 # 🏋️‍♀️ ACE Fitness & Gym — CI/CD with Jenkins, Docker & Kubernetes
 
-This project demonstrates a complete **CI/CD pipeline** for the `ace-fitness-and-gym` microservice application.  
-It integrates **Jenkins**, **SonarQube**, **Docker Hub**, and **Kubernetes** to achieve automated build, test, analysis, and deployment workflows.
+This project demonstrates a complete **CI/CD pipeline** for the `ace-fitness-and-gym` microservice application.
+It integrates **Jenkins**, **SonarCloud**, **Docker Hub**, and **Kubernetes** to achieve automated build, test, analysis, and deployment workflows.
 
 ---
 
 ## 🚀 Tech Stack
 
-| Category | Technology |
-|-----------|-------------|
-| **Language** | Python 3.10 |
-| **CI/CD** | Jenkins (Declarative Pipeline) |
-| **Code Quality** | SonarQube |
-| **Containerization** | Docker & Docker Hub |
-| **Deployment** | Kubernetes |
-| **Testing** | Pytest + Pytest-Cov |
+| Category             | Technology                     |
+| -------------------- | ------------------------------ |
+| **Language**         | Python 3.10                    |
+| **CI/CD**            | Jenkins (Declarative Pipeline) |
+| **Code Quality**     | SonarCloud                     |
+| **Containerization** | Docker & Docker Hub            |
+| **Deployment**       | Kubernetes                     |
+| **Testing**          | Pytest + Pytest-Cov            |
 
 ---
 
 ## 🧩 Architecture Overview
 
 ### CI/CD Flow
+
 1. Jenkins triggers automatically on every commit to `main`.
 2. Pipeline stages:
-   - **Checkout SCM** — fetches latest source from GitHub.
-   - **Unit Tests & Coverage** — runs Pytest inside a Python container.
-   - **SonarQube Analysis** — uploads metrics and coverage.
-   - **Docker Build & Push** — builds versioned images and pushes to Docker Hub.
-   - **Kubernetes Deployments** — uses Blue-Green, Canary, and Rolling strategies.
+
+   * **Checkout SCM** — fetches latest source from GitHub.
+   * **Unit Tests & Coverage** — runs Pytest inside a Python container.
+   * **SonarCloud Analysis** — uploads metrics and coverage.
+   * **Docker Build & Push** — builds versioned images and pushes to Docker Hub.
+   * **Kubernetes Deployments** — uses Blue-Green, Canary, and Rolling strategies.
 
 ### Container Registry
-All versions of the application are available on Docker Hub:  
-🔗 **[Docker Hub Repository → kalyanimuppidi/ace-fitness-and-gym](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)**
+
+All versions of the application are available on Docker Hub:
+🔗 [https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)
 
 **Available Tags**
+
 ```
-
 v1.0, v1.1, v1.2, v1.2.1, v1.2.2, v1.2.3, v1.3
-
-````
+```
 
 ---
 
@@ -49,7 +51,7 @@ pipeline {
   agent any
   environment {
     DOCKERHUB_REPO = 'kalyanimuppidi/ace-fitness-and-gym'
-    SONARQUBE_HOST = 'http://host.docker.internal:9000'
+    SONARCLOUD_HOST = 'https://sonarcloud.io'
   }
 
   stages {
@@ -62,14 +64,15 @@ pipeline {
       }
     }
 
-    stage('SonarQube Analysis') {
+    stage('SonarCloud Analysis') {
       steps {
         withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
           sh '''
             docker run --rm -v "$WORKSPACE":/usr/src -w /usr/src \
-            -e SONAR_HOST_URL="${SONARQUBE_HOST}" -e SONAR_LOGIN="$SONAR_TOKEN" \
+            -e SONAR_HOST_URL="${SONARCLOUD_HOST}" -e SONAR_LOGIN="$SONAR_TOKEN" \
             sonarsource/sonar-scanner-cli \
-            -Dsonar.projectKey=aceest-fitness \
+            -Dsonar.projectKey=kalyanimuppidi01_ace-fitness-and-gym \
+            -Dsonar.organization=kalyanimuppidi01 \
             -Dsonar.sources=. \
             -Dsonar.python.coverage.reportPaths=coverage.xml
           '''
@@ -94,7 +97,7 @@ pipeline {
     }
   }
 }
-````
+```
 
 ---
 
@@ -124,22 +127,14 @@ Coverage is generated using:
 pytest --cov=app --cov-report=xml:coverage.xml -q
 ```
 
-Then uploaded to SonarQube for detailed analysis.
+Then uploaded to SonarCloud for detailed analysis:
+🔗 [https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym](https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym)
 
 ---
-
-## 🐳 Multi-Version Image Automation
-
-To build and push all versions at once:
-
-```bash
-bash tools/push_all_versions.sh
-```
-
 This script:
 
-* Builds Docker images for every version (`v1.0` → `v1.3`),
-* Tags them correctly,
+* Builds Docker images for every version (`v1.0` → `v1.3`)
+* Tags them correctly
 * Pushes them to Docker Hub.
 
 ---
@@ -149,20 +144,20 @@ This script:
 | ID                 | Type              | Purpose                   |
 | ------------------ | ----------------- | ------------------------- |
 | `docker-hub-creds` | Username/Password | Docker Hub authentication |
-| `sonar-token`      | Secret Text       | SonarQube access token    |
+| `sonar-token`      | Secret Text       | SonarCloud access token   |
 | `kubeconfig`       | File              | Kubernetes cluster access |
 
 ---
 
 ## 💡 Key Challenges & Mitigations
 
-| Challenge                     | Mitigation                                                    |
-| ----------------------------- | ------------------------------------------------------------- |
-| SonarQube coverage XML errors | Custom Python script to convert coverage report format        |
-| Jenkins missing Docker        | Mounted `/var/run/docker.sock` and verified agent permissions |
-| kubeconfig mounting error     | Used dynamic filename resolution before volume mount          |
-| System performance (CPU/heat) | Stopped unused Docker containers & limited concurrency        |
-| Authentication failures       | Used Sonar token via Jenkins credentials securely             |
+| Challenge                      | Mitigation                                                    |
+| ------------------------------ | ------------------------------------------------------------- |
+| SonarCloud coverage XML errors | Adjusted `pytest --cov` output path and XML schema            |
+| Jenkins missing Docker         | Mounted `/var/run/docker.sock` and verified agent permissions |
+| kubeconfig mounting error      | Used dynamic filename resolution before volume mount          |
+| System performance (CPU/heat)  | Stopped unused Docker containers & limited concurrency        |
+| Authentication failures        | Used Sonar token via Jenkins credentials securely             |
 
 ---
 
@@ -170,7 +165,7 @@ This script:
 
 ✅ Fully automated **CI/CD pipeline**
 ✅ Multi-version **Docker image management**
-✅ Continuous **SonarQube code analysis**
+✅ Continuous **SonarCloud code analysis**
 ✅ Zero-downtime **Kubernetes deployments**
 ✅ Verified **Blue-Green, Canary, and Rolling** rollout models
 
@@ -178,21 +173,23 @@ This script:
 
 ## 📍 Access Summary
 
-| Component             | Local URL                                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------------------------- |
-| Application (Stable)  | `http://localhost:8080`                                                                                   |
-| Blue-Green            | `http://localhost:8081`                                                                                   |
-| Canary                | `http://localhost:8082`                                                                                   |
-| SonarQube Dashboard   | `http://localhost:9000/projects`                                                                          |
-| Jenkins Dashboard     | `http://localhost:8080` (container port)                                                                  |
-| Docker Hub Repository | 🔗 [View Repository](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general) |
+| Component             | URL                                                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application (Stable)  | `http://localhost:8080`                                                                                                                                                    |
+| Blue-Green            | `http://localhost:8081`                                                                                                                                                    |
+| Canary                | `http://localhost:8082`                                                                                                                                                    |
+| SonarCloud Dashboard  | [https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym](https://sonarcloud.io/project/overview?id=kalyanimuppidi01_ace-fitness-and-gym)           |
+| Jenkins Dashboard     | `http://localhost:8080`                                                                                                                                                    |
+| Docker Hub Repository | [https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general) |
 
 ---
 
 ## 👩‍💻 Maintainer
 
 **Kalyani Muppidi**
-📧 [GitHub Profile](https://github.com/kalyanimuppidi01)
-🐳 [Docker Hub](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)
+📧 [https://github.com/kalyanimuppidi01](https://github.com/kalyanimuppidi01)
+🐳 [https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general](https://hub.docker.com/repository/docker/kalyanimuppidi/ace-fitness-and-gym/general)
 
 ---
+
+Would you like me to generate this as a downloadable `README.md` file (so you can just drop it into your repo)?
