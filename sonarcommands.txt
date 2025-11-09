@@ -1,0 +1,3 @@
+curl -u 6a59a8c8e26d149dcb012f9b4427e307b6f713a2: "https://sonarcloud.io/api/measures/component?component=kalyanimuppidi01_ace-fitness-and-gym&metricKeys=coverage,bugs,vulnerabilities,code_smells,duplicated_lines_density"
+curl -u 6a59a8c8e26d149dcb012f9b4427e307b6f713a2: "https://sonarcloud.io/api/measures/component?component=kalyanimuppidi01_ace-fitness-and-gym&metricKeys=coverage,bugs,vulnerabilities,code_smells,duplicated_lines_density" > sonar_report.json
+curl -u 6a59a8c8e26d149dcb012f9b4427e307b6f713a2: "https://sonarcloud.io/api/issues/search?componentKeys=kalyanimuppidi01_ace-fitness-and-gym&types=BUG,VULNERABILITY,CODE_SMELL&ps=500" > sonar_issues.json
